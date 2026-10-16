@@ -1,0 +1,128 @@
+name: QuantumCalc E2E CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # 1. BACKEND TEST & LINT SUITE
+  # =========================================================================
+  backend-ci:
+    name: Backend Scientific Engine (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install httpx
+
+      - name: Run Backend Unit Tests
+        run: |
+          python -m unittest backend.test_api
+
+      - name: Run E2E Scientific Pipeline Tests
+        run: |
+          python -m unittest tests.test_e2e
+
+  # =========================================================================
+  # 2. FRONTEND BUILD & VALIDATION
+  # =========================================================================
+  frontend-ci:
+    name: Next.js Studio Build & Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: frontend/package.json
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci || npm install
+
+      - name: Validate Next.js Production Build
+        working-directory: ./frontend
+        run: npm run build
+
+  # =========================================================================
+  # 3. DOCKER INTEGRATION & LIVE CONTAINER E2E TESTING
+  # =========================================================================
+  docker-e2e:
+    name: Docker Multi-Container Live E2E Verification
+    runs-on: ubuntu-latest
+    needs: [backend-ci, frontend-ci]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Build Docker Containers
+        run: |
+          docker compose build
+
+      - name: Launch Containerized Stack
+        run: |
+          docker compose up -d
+          echo "Waiting for services to become healthy..."
+          sleep 12
+
+      - name: Verify Backend Health Endpoint in Docker
+        run: |
+          curl -f http://localhost:8000/api/health || (docker compose logs backend && exit 1)
+
+      - name: Verify Frontend Web Studio in Docker
+        run: |
+          curl -f http://localhost:3000 || (docker compose logs frontend && exit 1)
+
+      - name: Execute Live Containerized Calculation API Test
+        run: |
+          response=$(curl -s -X POST http://localhost:8000/api/calculate \
+            -H "Content-Type: application/json" \
+            -d '{"expression": "pi * 2", "precision": 20}')
+          echo "API Response: $response"
+          echo "$response" | grep -q '"success":true'
+
+      - name: Execute Live Containerized Calculus Derivative Test
+        run: |
+          response=$(curl -s -X POST http://localhost:8000/api/calculus \
+            -H "Content-Type: application/json" \
+            -d '{"expression": "x^3 - 3*x", "variable": "x", "operation": "diff"}')
+          echo "Calculus Response: $response"
+          echo "$response" | grep -q '"success":true'
+
+      - name: Teardown Docker Stack
+        if: always()
+        run: |
+          docker compose down

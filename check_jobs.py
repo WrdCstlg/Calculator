@@ -1,6 +1,5 @@
 import urllib.request
 import json
-import time
 
 def check_run_jobs(repo, run_id):
     url = f"https://api.github.com/repos/WrdCstlg/{repo}/actions/runs/{run_id}/jobs"
@@ -10,12 +9,16 @@ def check_run_jobs(repo, run_id):
             data = json.loads(resp.read().decode("utf-8"))
             jobs = data.get("jobs", [])
             for j in jobs:
-                print(f"    Job: '{j.get('name')}' -> Status: {j.get('status')} | Conclusion: {j.get('conclusion')}")
+                print(f"  Job: '{j.get('name')}' -> Status: {j.get('status')} | Conclusion: {j.get('conclusion')}")
+                for s in j.get('steps', []):
+                    status = s.get('status')
+                    conclusion = s.get('conclusion')
+                    print(f"      Step [{s.get('number')}]: {s.get('name')} -> {status} ({conclusion})")
     except Exception as e:
-        print("Error checking jobs:", e)
+        print(f"Error checking jobs for {repo}:", e)
 
-print("Checking Calculator Run 38847309904:")
-check_run_jobs("Calculator", 38847309904)
+print("=== Calculator Run 38847440804 ===")
+check_run_jobs("Calculator", 38847440804)
 
-print("\nChecking Alphabet Safari Run 38847313346:")
-check_run_jobs("alphabet-safari", 38847313346)
+print("\n=== Alphabet Safari Run 38847444303 ===")
+check_run_jobs("alphabet-safari", 38847444303)
